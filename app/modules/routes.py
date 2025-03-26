@@ -9,6 +9,22 @@ from .pubmed_api import PubMedAPI
 bp = Blueprint('main', __name__)
 pubmed_api = PubMedAPI()
 
+# Store progress information
+search_progress = {
+    'current': 0,
+    'total': 0,
+    'status': '',
+    'complete': False
+}
+
+def progress_callback(current, total, status):
+    """Callback function to update progress"""
+    global search_progress
+    search_progress['current'] = current
+    search_progress['total'] = total
+    search_progress['status'] = status
+    search_progress['complete'] = (current >= total)
+
 def get_config_path():
     return os.path.join(current_app.root_path, 'config', 'manufacturer_config.json')
 
@@ -118,26 +134,45 @@ def reorder_companies():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@bp.route('/search/progress')
+def get_progress():
+    """Get the current progress of the search operation"""
+    return jsonify(search_progress)
+
 @bp.route('/search', methods=['POST'])
 def search():
     """Handle the search request and return publication counts"""
     try:
+        global search_progress
+        search_progress = {
+            'current': 0,
+            'total': 0,
+            'status': 'Starting search...',
+            'complete': False
+        }
+        
         data = request.get_json()
-        topic = data.get('topic', '')  # Make topic optional
+        topic = data.get('topic', '')
         start_year = int(data.get('start_year'))
         end_year = int(data.get('end_year'))
         manufacturers = data.get('manufacturers', [])
 
-        if not all([start_year, end_year, manufacturers]):  # Remove topic from required parameters
+        if not all([start_year, end_year, manufacturers]):
             return jsonify({"error": "Missing required parameters"}), 400
+
+        # Set up progress tracking
+        pubmed_api.set_progress_callback(progress_callback)
 
         results = pubmed_api.get_publication_counts_by_year(
             topic, manufacturers, start_year, end_year
         )
         
+        search_progress['complete'] = True
         return jsonify(results)
     
     except Exception as e:
+        search_progress['status'] = f"Error: {str(e)}"
+        search_progress['complete'] = True
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/details', methods=['GET'])
@@ -205,5 +240,23 @@ def export_results():
             download_name=f'pubmed_results_{timestamp}.csv'
         )
         
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@bp.route('/basic_search', methods=['POST'])
+def basic_search():
+    """Handle basic search request"""
+    try:
+        data = request.get_json()
+        query = data.get('query', '')
+        start_year = int(data.get('start_year'))
+        end_year = int(data.get('end_year'))
+
+        if not all([query, start_year, end_year]):
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        results = pubmed_api.basic_search(query, start_year, end_year)
+        return jsonify(results)
+    
     except Exception as e:
         return jsonify({"error": str(e)}), 500 
