@@ -1,0 +1,521 @@
+{% extends 'base.html' %}
+
+{% block title %}PubMed Search{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <h1 class="mb-4">PubMed Search</h1>
+    
+    {# Flash Messages #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    {# Search Form #}
+    <form method="GET" class="mb-4">
+        <div class="mb-3">
+            <div class="input-group">
+                <input type="text" name="query" class="form-control" placeholder="Enter your search query..." value="{{ query }}" required>
+                {% if search_type %}
+                <input type="hidden" name="search_type" value="{{ search_type }}">
+                {% endif %}
+                <button type="submit" class="btn btn-primary" id="searchButton">
+                    <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true" id="searchSpinner"></span>
+                    Search
+                </button>
+            </div>
+        </div>
+
+        {# Advanced Search Options #}
+        <div class="mb-3">
+            <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#advancedSearch">
+                Advanced Search Options
+            </button>
+            <div class="collapse mt-2" id="advancedSearch">
+                <div class="card card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-2">
+                                <label class="form-label">Publication Year Range</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="number" name="year_from" class="form-control" placeholder="From" value="{{ request.args.get('year_from', '') }}">
+                                    <span class="input-group-text">to</span>
+                                    <input type="number" name="year_to" class="form-control" placeholder="To" value="{{ request.args.get('year_to', '') }}">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-2">
+                                <label class="form-label">Grant Number</label>
+                                <input type="text" name="grant_number" class="form-control form-control-sm" placeholder="Enter grant number" value="{{ request.args.get('grant_number', '') }}">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-2">
+                                <label class="form-label">Publication Type</label>
+                                <input type="text" name="publication_type" class="form-control form-control-sm" placeholder="e.g., Clinical Trial" value="{{ request.args.get('publication_type', '') }}">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label">MeSH Terms</label>
+                                <input type="text" name="mesh_terms" class="form-control form-control-sm" placeholder="Enter MeSH terms" value="{{ request.args.get('mesh_terms', '') }}">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <label class="form-label">Search Type</label>
+                                <select name="search_type" class="form-select form-select-sm">
+                                    <option value="">All Fields</option>
+                                    <option value="author" {% if search_type == 'author' %}selected{% endif %}>Author</option>
+                                    <option value="journal" {% if search_type == 'journal' %}selected{% endif %}>Journal</option>
+                                    <option value="affiliation" {% if search_type == 'affiliation' %}selected{% endif %}>Affiliation</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+
+    {% if search_type %}
+    <div class="mb-4">
+        <a href="?" class="btn btn-outline-secondary">← Back to Regular Search</a>
+    </div>
+    {% endif %}
+
+    {% if formatted_query %}
+    <div class="card mb-4">
+        <div class="card-header bg-light">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-link-45deg"></i> PubMed Search String
+                <button class="btn btn-sm btn-outline-primary float-end" onclick="copySearchString()" id="copyButton">
+                    <i class="bi bi-clipboard"></i> Copy
+                </button>
+            </h5>
+        </div>
+        <div class="card-body">
+            <p class="mb-1"><small class="text-muted">Use this search string to validate results on PubMed:</small></p>
+            <div class="bg-light p-3 rounded" id="searchString">{{ formatted_query }}</div>
+            <div class="mt-2">
+                <a href="https://pubmed.ncbi.nlm.nih.gov/?term={{ formatted_query|urlencode }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-box-arrow-up-right"></i> Open in PubMed
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if query %}
+        {% if total_results is defined and total_results > 0 %}
+            <div class="alert alert-info mb-4">
+                {% if search_type == 'author' %}
+                    Found {{ total_results }} papers by {{ query }}
+                {% elif search_type == 'journal' %}
+                    Found {{ total_results }} papers in {{ query }}
+                {% else %}
+                    Found {{ total_results }} results for "{{ query }}"
+                {% endif %}
+                {% if sampling_info %}
+                <div class="mt-2 small">
+                    <strong>Statistics based on:</strong> {{ sampling_info.sampled_results }} sampled results ({{ sampling_info.sampling_percentage }}% of total)
+                </div>
+                {% endif %}
+            </div>
+
+            {# Summary Statistics Section #}
+            {% if year_stats is defined and top_authors is defined and top_journals is defined %}
+            <div class="row mb-4">
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="card-title mb-0">Publications by Year</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Year</th>
+                                            <th>Count</th>
+                                            <th>Distribution</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for year, count in year_stats.items() %}
+                                        <tr>
+                                            <td>{{ year }}</td>
+                                            <td>{{ count }}</td>
+                                            <td>
+                                                <div class="progress" style="height: 15px;">
+                                                    <div class="progress-bar bg-primary" role="progressbar" 
+                                                         style="width: {{ (count / sampling_info.sampled_results * 100)|round }}%;" 
+                                                         aria-valuenow="{{ count }}" aria-valuemin="0" aria-valuemax="{{ sampling_info.sampled_results }}">
+                                                        {{ (count / sampling_info.sampled_results * 100)|round|int }}%
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="card-title mb-0">Top 10 Authors</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Author</th>
+                                            <th>Publications</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for author, count in top_authors.items() %}
+                                        <tr>
+                                            <td>
+                                                <a href="?query={{ author|urlencode }}&search_type=author" class="author-link">
+                                                    {{ author }}
+                                                </a>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-success">{{ count }}</span>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="card-title mb-0">Top 10 Journals</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Journal</th>
+                                            <th>Publications</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for journal, count in top_journals.items() %}
+                                        <tr>
+                                            <td>
+                                                <a href="?query={{ journal|urlencode }}&search_type=journal" class="journal-link">
+                                                    {{ journal }}
+                                                </a>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-info">{{ count }}</span>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {# Additional Statistics Section #}
+            {% if top_affiliations is defined and top_grants is defined and top_mesh_terms is defined %}
+            <div class="row mb-4">
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header bg-warning text-dark">
+                            <h5 class="card-title mb-0">Top 10 Affiliations</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Affiliation</th>
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for affiliation, count in top_affiliations.items() %}
+                                        <tr>
+                                            <td>
+                                                <a href="?query={{ affiliation|urlencode }}&search_type=affiliation" class="affiliation-link">
+                                                    {{ affiliation }}
+                                                </a>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-warning text-dark">{{ count }}</span>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header bg-danger text-white">
+                            <h5 class="card-title mb-0">Top 10 Grants</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Grant</th>
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for grant, count in top_grants.items() %}
+                                        <tr>
+                                            <td>{{ grant }}</td>
+                                            <td>
+                                                <span class="badge bg-danger">{{ count }}</span>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header bg-secondary text-white">
+                            <h5 class="card-title mb-0">Top 10 MeSH Terms</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>MeSH Term</th>
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for term, count in top_mesh_terms.items() %}
+                                        <tr>
+                                            <td>{{ term }}</td>
+                                            <td>
+                                                <span class="badge bg-secondary">{{ count }}</span>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {# Results Table #}
+            {% if articles is defined and articles %}
+            <div class="table-responsive mb-4">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>PMID</th>
+                            <th>Title</th>
+                            <th>Authors</th>
+                            <th>Journal</th>
+                            <th>Publication Date</th>
+                            <th>Abstract</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for article in articles %}
+                        <tr>
+                            <td>
+                                <a href="https://pubmed.ncbi.nlm.nih.gov/{{ article.PMID }}" target="_blank">
+                                    {{ article.PMID }}
+                                </a>
+                            </td>
+                            <td>{{ article.Title }}</td>
+                            <td>
+                                {% set authors = article.Authors.split('; ') %}
+                                {% for author in authors %}
+                                    {% if not loop.last %}
+                                        <a href="?query={{ author|urlencode }}&search_type=author" class="author-link">{{ author }}</a>;
+                                    {% else %}
+                                        <a href="?query={{ author|urlencode }}&search_type=author" class="author-link">{{ author }}</a>
+                                    {% endif %}
+                                {% endfor %}
+                            </td>
+                            <td>
+                                <a href="?query={{ article.Journal|urlencode }}&search_type=journal" class="journal-link">{{ article.Journal }}</a>
+                            </td>
+                            <td>{{ article.Publication_Date }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" type="button" 
+                                        data-bs-toggle="collapse" 
+                                        data-bs-target="#abstract-{{ article.PMID }}" 
+                                        aria-expanded="false">
+                                    Show Abstract
+                                </button>
+                                <div class="collapse mt-2" id="abstract-{{ article.PMID }}">
+                                    <div class="card card-body">
+                                        {{ article.Abstract }}
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {# Pagination #}
+            {% if total_pages > 1 %}
+            <nav aria-label="Search results pages">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item {{ 'disabled' if current_page == 1 }}">
+                        <a class="page-link" href="{{ '?query=' + query + '&page=' + (current_page - 1)|string + ('&search_type=' + search_type if search_type) if current_page > 1 }}" aria-label="Previous">
+                            <span aria-hidden="true">&laquo;</span>
+                        </a>
+                    </li>
+                    
+                    {% for p in page_range %}
+                    <li class="page-item {{ 'active' if p == current_page }}">
+                        <a class="page-link" href="?query={{ query }}&page={{ p }}{{ '&search_type=' + search_type if search_type }}">{{ p }}</a>
+                    </li>
+                    {% endfor %}
+                    
+                    <li class="page-item {{ 'disabled' if current_page == total_pages }}">
+                        <a class="page-link" href="{{ '?query=' + query + '&page=' + (current_page + 1)|string + ('&search_type=' + search_type if search_type else '') if current_page < total_pages else '#' }}" aria-label="Next">
+                            <span aria-hidden="true">&raquo;</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            {% endif %}
+        {% else %}
+            <div class="alert alert-warning">
+                No results found for "{{ query }}"
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+<style>
+.author-link, .journal-link {
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px dashed #6c757d;
+}
+
+.author-link:hover, .journal-link:hover {
+    color: #0d6efd;
+    border-bottom: 1px solid #0d6efd;
+    text-decoration: none;
+}
+
+.card {
+    transition: transform 0.2s ease-in-out;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+.card-header {
+    border-bottom: 0;
+}
+
+.progress {
+    background-color: #e9ecef;
+    border-radius: 0.5rem;
+}
+
+.progress-bar {
+    border-radius: 0.5rem;
+    transition: width 0.6s ease;
+}
+
+.table-sm td, .table-sm th {
+    padding: 0.5rem;
+    vertical-align: middle;
+}
+
+.badge {
+    font-size: 0.875rem;
+    padding: 0.4em 0.8em;
+}
+
+.shadow-sm {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075) !important;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.querySelector('form');
+    const searchButton = document.getElementById('searchButton');
+    const searchSpinner = document.getElementById('searchSpinner');
+
+    form.addEventListener('submit', function() {
+        searchButton.disabled = true;
+        searchSpinner.classList.remove('d-none');
+    });
+});
+
+function copySearchString() {
+    const searchString = document.getElementById('searchString').textContent;
+    navigator.clipboard.writeText(searchString).then(() => {
+        const copyButton = document.getElementById('copyButton');
+        const originalText = copyButton.innerHTML;
+        copyButton.innerHTML = '<i class="bi bi-check"></i> Copied!';
+        copyButton.classList.remove('btn-outline-primary');
+        copyButton.classList.add('btn-success');
+        setTimeout(() => {
+            copyButton.innerHTML = originalText;
+            copyButton.classList.remove('btn-success');
+            copyButton.classList.add('btn-outline-primary');
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy text: ', err);
+        alert('Failed to copy search string to clipboard');
+    });
+}
+</script>
+{% endblock %} 

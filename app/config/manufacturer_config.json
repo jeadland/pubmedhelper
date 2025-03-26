@@ -1,0 +1,53 @@
+{
+  "GE HealthCare": {
+    "display_order": 3,
+    "variations": [
+      {
+        "name": "General Electic",
+        "start_year": 1900,
+        "end_year": 2025
+      },
+      {
+        "name": "General Electric HealthCare",
+        "start_year": 1900,
+        "end_year": 2025
+      },
+      {
+        "name": "General Electric Healthcare",
+        "start_year": 1900,
+        "end_year": 2025
+      },
+      {
+        "name": "GE Research",
+        "start_year": 1900,
+        "end_year": 2025
+      },
+      {
+        "name": "General Electric Research",
+        "start_year": 1900,
+        "end_year": 2025
+      },
+      {
+        "name": "General Electric Medical Systems",
+        "start_year": 1900,
+        "end_year": 2025
+      },
+      {
+        "name": "General Electric Global Research",
+        "start_year": 1900,
+        "end_year": 2025
+      },
+      {
+        "name": "GE Global Research",
+        "start_year": 1900,
+        "end_year": 2025
+      },
+      {
+        "name": "GE Medical Systems",
+        "start_year": 1900,
+        "end_year": 2025
+      }
+    ],
+    "acquisitions": []
+  }
+}

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Company Configuration - PubMed Publication Analysis</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shopify/draggable@1.0.0-beta.8/lib/draggable.bundle.css"/>
+    <style>
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .company-list {
+            min-height: 100px;
+        }
+        .company-item {
+            cursor: move;
+            user-select: none;
+        }
+        .company-item.draggable-source--is-dragging {
+            opacity: 0.5;
+        }
+        .company-item.draggable-mirror {
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <div class="container py-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Company Configuration</h1>
+            <a href="/" class="btn btn-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Search
+            </a>
+        </div>
+
+        <!-- Add Company Form -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Add New Company</h5>
+                <form id="companyForm">
+                    <div class="mb-3">
+                        <label for="companyName" class="form-label">Company Name</label>
+                        <input type="text" class="form-control" id="companyName" required>
+                    </div>
+
+                    <!-- Name Variations -->
+                    <div class="mb-3">
+                        <label class="form-label">Name Variations</label>
+                        <div id="variationsList" class="mb-2"></div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addVariation()">
+                            <i class="bi bi-plus"></i> Add Name Variation
+                        </button>
+                    </div>
+
+                    <!-- Acquisitions -->
+                    <div class="mb-3">
+                        <label class="form-label">Acquisitions</label>
+                        <div id="acquisitionsList" class="mb-2"></div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addAcquisition()">
+                            <i class="bi bi-plus"></i> Add Acquisition
+                        </button>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Save Company</button>
+                    <button type="button" class="btn btn-secondary" onclick="resetForm()" style="display: none;" id="cancelButton">Cancel</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Companies List -->
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Configured Companies</h5>
+                <p class="card-text text-muted">Drag companies to reorder how they appear in the results.</p>
+                <div class="company-list" id="companiesList">
+                    <!-- Companies will be added here dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Variation Template -->
+    <template id="variationTemplate">
+        <div class="card mb-2 variation-item">
+            <div class="card-body">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <input type="text" class="form-control variation-name" placeholder="Name Variation" required>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="number" class="form-control variation-start" placeholder="Start Year" required min="1900" max="2100">
+                    </div>
+                    <div class="col-md-2">
+                        <input type="number" class="form-control variation-end" placeholder="End Year" required min="1900" max="2100">
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-outline-danger btn-sm w-100" onclick="removeItem(this)">
+                            <i class="bi bi-trash"></i> Remove
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Acquisition Template -->
+    <template id="acquisitionTemplate">
+        <div class="card mb-2 acquisition-item">
+            <div class="card-body">
+                <div class="row g-2">
+                    <div class="col-md-8">
+                        <input type="text" class="form-control acquisition-name" placeholder="Acquired Company Name" required>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="number" class="form-control acquisition-year" placeholder="Year" required min="1900" max="2100">
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-outline-danger btn-sm w-100" onclick="removeItem(this)">
+                            <i class="bi bi-trash"></i> Remove
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <script src="https://cdn.jsdelivr.net/npm/@shopify/draggable@1.0.0-beta.8/lib/draggable.bundle.js"></script>
+    <script>
+        // Global variables
+        let companies = {};
+        let editingCompany = null;  // Track which company is being edited
+
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCompanies();
+            initializeDragAndDrop();
+        });
+
+        // Load companies from the server
+        async function loadCompanies() {
+            try {
+                const response = await fetch('/api/companies');
+                companies = await response.json();
+                displayCompanies();
+            } catch (error) {
+                console.error('Error loading companies:', error);
+                alert('Error loading companies');
+            }
+        }
+
+        // Display companies in the list
+        function displayCompanies() {
+            const list = document.getElementById('companiesList');
+            list.innerHTML = '';
+
+            // Sort companies by display order
+            const sortedCompanies = Object.entries(companies)
+                .sort((a, b) => (a[1].display_order || 0) - (b[1].display_order || 0));
+
+            for (const [name, data] of sortedCompanies) {
+                const item = document.createElement('div');
+                item.className = 'card mb-2 company-item';
+                item.setAttribute('data-company', name);
+                item.innerHTML = `
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">${name}</h6>
+                            <div class="btn-group">
+                                <button class="btn btn-outline-primary btn-sm" onclick="editCompany('${name}')">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm" onclick="deleteCompany('${name}')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="small text-muted mt-2">
+                            ${data.variations?.length || 0} variations, 
+                            ${data.acquisitions?.length || 0} acquisitions
+                        </div>
+                    </div>
+                `;
+                list.appendChild(item);
+            }
+        }
+
+        // Initialize drag and drop functionality
+        function initializeDragAndDrop() {
+            const sortable = new window.Draggable.Sortable(document.getElementById('companiesList'), {
+                draggable: '.company-item',
+                handle: '.card-body'
+            });
+
+            sortable.on('sortable:stop', async function() {
+                const order = Array.from(document.querySelectorAll('.company-item'))
+                    .map(item => item.getAttribute('data-company'));
+                
+                try {
+                    const response = await fetch('/api/companies/reorder', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ order })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to update order');
+                    }
+                } catch (error) {
+                    console.error('Error updating order:', error);
+                    alert('Error updating display order');
+                    loadCompanies(); // Reload the original order
+                }
+            });
+        }
+
+        // Add a new variation field
+        function addVariation() {
+            const template = document.getElementById('variationTemplate');
+            const clone = template.content.cloneNode(true);
+            document.getElementById('variationsList').appendChild(clone);
+        }
+
+        // Add a new acquisition field
+        function addAcquisition() {
+            const template = document.getElementById('acquisitionTemplate');
+            const clone = template.content.cloneNode(true);
+            document.getElementById('acquisitionsList').appendChild(clone);
+        }
+
+        // Remove an item (variation or acquisition)
+        function removeItem(button) {
+            button.closest('.card').remove();
+        }
+
+        // Delete a company
+        async function deleteCompany(name) {
+            if (!confirm(`Are you sure you want to delete ${name}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/companies/${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    loadCompanies();
+                } else {
+                    throw new Error('Failed to delete company');
+                }
+            } catch (error) {
+                console.error('Error deleting company:', error);
+                alert('Error deleting company');
+            }
+        }
+
+        // Edit a company
+        function editCompany(name) {
+            const company = companies[name];
+            if (!company) return;
+
+            editingCompany = name;
+            
+            // Update form title and button
+            document.querySelector('.card-title').textContent = 'Edit Company';
+            document.querySelector('#companyForm button[type="submit"]').textContent = 'Update Company';
+            document.getElementById('cancelButton').style.display = 'inline-block';
+            
+            // Fill in company name
+            document.getElementById('companyName').value = name;
+            
+            // Clear existing variations and acquisitions
+            document.getElementById('variationsList').innerHTML = '';
+            document.getElementById('acquisitionsList').innerHTML = '';
+            
+            // Add existing variations
+            if (company.variations) {
+                company.variations.forEach(variation => {
+                    const template = document.getElementById('variationTemplate');
+                    const clone = template.content.cloneNode(true);
+                    const div = document.getElementById('variationsList');
+                    div.appendChild(clone);
+                    
+                    const item = div.lastElementChild;
+                    item.querySelector('.variation-name').value = variation.name;
+                    item.querySelector('.variation-start').value = variation.start_year;
+                    item.querySelector('.variation-end').value = variation.end_year;
+                });
+            }
+            
+            // Add existing acquisitions
+            if (company.acquisitions) {
+                company.acquisitions.forEach(acquisition => {
+                    const template = document.getElementById('acquisitionTemplate');
+                    const clone = template.content.cloneNode(true);
+                    const div = document.getElementById('acquisitionsList');
+                    div.appendChild(clone);
+                    
+                    const item = div.lastElementChild;
+                    item.querySelector('.acquisition-name').value = acquisition.name;
+                    item.querySelector('.acquisition-year').value = acquisition.year;
+                });
+            }
+            
+            // Scroll to the form
+            document.querySelector('.card').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Reset form to add new company state
+        function resetForm() {
+            editingCompany = null;
+            document.querySelector('.card-title').textContent = 'Add New Company';
+            document.querySelector('#companyForm button[type="submit"]').textContent = 'Save Company';
+            document.getElementById('cancelButton').style.display = 'none';
+            document.getElementById('companyForm').reset();
+            document.getElementById('variationsList').innerHTML = '';
+            document.getElementById('acquisitionsList').innerHTML = '';
+        }
+
+        // Handle form submission
+        document.getElementById('companyForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const companyData = {
+                name: document.getElementById('companyName').value,
+                variations: Array.from(document.querySelectorAll('.variation-item')).map(item => ({
+                    name: item.querySelector('.variation-name').value,
+                    start_year: parseInt(item.querySelector('.variation-start').value),
+                    end_year: parseInt(item.querySelector('.variation-end').value)
+                })),
+                acquisitions: Array.from(document.querySelectorAll('.acquisition-item')).map(item => ({
+                    name: item.querySelector('.acquisition-name').value,
+                    year: parseInt(item.querySelector('.acquisition-year').value)
+                }))
+            };
+
+            // If editing, preserve the display order
+            if (editingCompany && companies[editingCompany]) {
+                companyData.display_order = companies[editingCompany].display_order;
+            }
+
+            try {
+                const response = await fetch('/api/companies', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(companyData)
+                });
+
+                if (response.ok) {
+                    resetForm();
+                    loadCompanies();
+                } else {
+                    throw new Error('Failed to save company');
+                }
+            } catch (error) {
+                console.error('Error saving company:', error);
+                alert('Error saving company');
+            }
+        });
+
+        // Loading indicator functions
+        function showLoading() {
+            document.querySelector('.loading').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.querySelector('.loading').style.display = 'none';
+        }
+    </script>
+</body>
+</html> 
