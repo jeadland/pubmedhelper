@@ -72,6 +72,7 @@ def create_company():
         # Create new company entry with display order
         company_data = {
             "display_order": data.get('display_order', len(config) + 1),
+            "color": data.get('color', '#000000'),  # Add color field with default black
             "variations": []
         }
 

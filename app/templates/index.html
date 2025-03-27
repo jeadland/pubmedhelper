@@ -593,6 +593,8 @@
         const datasets = data.manufacturers.map(company => ({
             label: company,
             data: data.years.map(year => data.counts[year][company]),
+            borderColor: companies[company].color || '#000000',
+            backgroundColor: companies[company].color || '#000000',
             fill: false
         }));
         
