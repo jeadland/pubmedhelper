@@ -175,24 +175,28 @@ def search():
         search_progress['complete'] = True
         return jsonify({"error": str(e)}), 500
 
-@bp.route('/details', methods=['GET'])
+@bp.route('/details')
 def get_details():
-    """Get detailed results for a specific year and manufacturer"""
-    try:
-        topic = request.args.get('topic')
-        manufacturer = request.args.get('manufacturer')
-        year = int(request.args.get('year'))
-        page = int(request.args.get('page', 1))
-        
-        if not all([topic, manufacturer, year]):
-            return jsonify({"error": "Missing required parameters"}), 400
-        
-        results = pubmed_api.get_detailed_results(
-            topic, manufacturer, year, page
-        )
-        
-        return jsonify(results)
+    """Get detailed publication results for a specific query"""
+    topic = request.args.get('topic', '')
+    manufacturer = request.args.get('manufacturer')
+    year = request.args.get('year')
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 100, type=int)
     
+    # Validate per_page to ensure it's within reasonable limits
+    per_page = min(max(25, per_page), 250)
+    
+    if not all([manufacturer, year]):
+        return jsonify({"error": "Missing required parameters"}), 400
+    
+    try:
+        year = int(year)
+        pubmed_api = PubMedAPI()
+        results = pubmed_api.get_detailed_results(topic, manufacturer, year, page, per_page)
+        # Add per_page to the response
+        results['per_page'] = per_page
+        return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -251,11 +255,19 @@ def basic_search():
         query = data.get('query', '')
         start_year = int(data.get('start_year'))
         end_year = int(data.get('end_year'))
+        page = data.get('page', 1)
+        results_per_page = data.get('results_per_page', 20)
+        
+        # Validate per_page to ensure it's within reasonable limits
+        results_per_page = min(max(10, results_per_page), 100)
 
         if not all([query, start_year, end_year]):
             return jsonify({"error": "Missing required parameters"}), 400
 
-        results = pubmed_api.basic_search(query, start_year, end_year)
+        pubmed_api = PubMedAPI()
+        results = pubmed_api.basic_search(query, start_year, end_year, page, results_per_page)
+        # Add per_page to the response
+        results['results_per_page'] = results_per_page
         return jsonify(results)
     
     except Exception as e:

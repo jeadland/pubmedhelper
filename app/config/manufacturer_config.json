@@ -49,5 +49,16 @@
       }
     ],
     "acquisitions": []
+  },
+  "United Imaging": {
+    "display_order": 2,
+    "variations": [
+      {
+        "name": "United Imaging Healthcare",
+        "start_year": 2000,
+        "end_year": 2025
+      }
+    ],
+    "acquisitions": []
   }
 }

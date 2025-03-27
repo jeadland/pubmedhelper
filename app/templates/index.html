@@ -34,6 +34,23 @@
     .section.active {
         display: block;
     }
+    /* Styles for the results per page dropdown */
+    #resultsPerPage, #basicResultsPerPage {
+        border: 1px solid #007bff;
+        transition: all 0.3s ease;
+    }
+    #resultsPerPage:hover, #basicResultsPerPage:hover {
+        border-color: #0056b3;
+        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    }
+    #resultsPerPage:focus, #basicResultsPerPage:focus {
+        border-color: #0056b3;
+        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.5);
+    }
+    label[for="resultsPerPage"], label[for="basicResultsPerPage"] {
+        color: #007bff;
+        font-weight: 500;
+    }
 </style>
 {% endblock %}
 
@@ -179,17 +196,29 @@
     </div>
 
     <!-- Detail View -->
-    <div id="detailView" class="detail-view">
+    <div id="detailView" style="display: none;">
         <div class="card">
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h5 class="card-title" id="detailTitle"></h5>
-                    <button class="btn btn-secondary" id="backToSummary">
-                        <i class="bi bi-arrow-left"></i> Back to Summary
-                    </button>
+                <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
+                    <h5 class="card-title m-0 mb-2 mb-md-0" id="detailTitle"></h5>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <div class="d-flex align-items-center me-2">
+                            <label for="resultsPerPage" class="mb-0 me-2">Results per page:</label>
+                            <select class="form-select form-select-sm" id="resultsPerPage" style="width: 70px;" 
+                                    title="Change the number of results shown per page">
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                                <option value="100" selected>100</option>
+                                <option value="250">250</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-secondary" id="backToSummary">
+                            <i class="bi bi-arrow-left"></i> Back to Summary
+                        </button>
+                    </div>
                 </div>
                 <div id="detailContent"></div>
-                <nav aria-label="Publication navigation">
+                <nav aria-label="Publication navigation" class="mt-4">
                     <ul class="pagination justify-content-center" id="pagination"></ul>
                 </nav>
             </div>
@@ -277,35 +306,11 @@
                 return;
             }
 
-            showLoading();
-            try {
-                const response = await fetch('/basic_search', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        query: query,
-                        start_year: startYear,
-                        end_year: endYear
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error('Search failed');
-                }
-
-                const data = await response.json();
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-
-                displayBasicSearchResults(data);
-            } catch (error) {
-                alert('Error performing search: ' + error.message);
-            } finally {
-                hideLoading();
-            }
+            // Default to 20 results per page for initial search
+            const resultsPerPage = 20;
+            
+            // Use our shared function for performing the search
+            await performBasicSearch(query, startYear, endYear, 1, resultsPerPage);
         });
     });
 
@@ -489,9 +494,6 @@
             searchTerms.push(`(${topic})`);
         }
         
-        // Get current year as fallback for end_year "present"
-        const currentYear = new Date().getFullYear();
-        
         // Company affiliations combined with OR
         const companyTerms = [];
         
@@ -499,9 +501,16 @@
         for (const companyName of selectedCompanies) {
             const company = companies[companyName];
             if (!company) {
-                companyTerms.push(`"${companyName}"[Affiliation]`);
-                companyTerms.push(`"${companyName}"[Grant Number]`);
-                companyTerms.push(`"${companyName}"[Grant]`);
+                // Add both full name and abbreviation if available
+                if (companyName.includes('General Electric')) {
+                    companyTerms.push(`${companyName}[Affiliation]`);
+                    companyTerms.push(`${companyName}[Grant Number]`);
+                    companyTerms.push(`GE[Affiliation]`);
+                    companyTerms.push(`GE[Grant Number]`);
+                } else {
+                    companyTerms.push(`${companyName}[Affiliation]`);
+                    companyTerms.push(`${companyName}[Grant Number]`);
+                }
                 continue;
             }
             
@@ -511,9 +520,8 @@
             if (company.variations && Array.isArray(company.variations)) {
                 company.variations.forEach(variation => {
                     if (variation.end_year >= startYear && variation.start_year <= endYear) {
-                        companyAffiliations.push(`"${variation.name}"[Affiliation]`);
-                        companyAffiliations.push(`"${variation.name}"[Grant Number]`);
-                        companyAffiliations.push(`"${variation.name}"[Grant]`);
+                        companyAffiliations.push(`${variation.name}[Affiliation]`);
+                        companyAffiliations.push(`${variation.name}[Grant Number]`);
                     }
                 });
             }
@@ -522,18 +530,16 @@
             if (company.acquisitions && Array.isArray(company.acquisitions)) {
                 company.acquisitions.forEach(acq => {
                     if (acq.year <= endYear) {
-                        companyAffiliations.push(`"${acq.name}"[Affiliation]`);
-                        companyAffiliations.push(`"${acq.name}"[Grant Number]`);
-                        companyAffiliations.push(`"${acq.name}"[Grant]`);
+                        companyAffiliations.push(`${acq.name}[Affiliation]`);
+                        companyAffiliations.push(`${acq.name}[Grant Number]`);
                     }
                 });
             }
             
             // If no variations/acquisitions were added, use the company name itself
             if (companyAffiliations.length === 0) {
-                companyAffiliations.push(`"${companyName}"[Affiliation]`);
-                companyAffiliations.push(`"${companyName}"[Grant Number]`);
-                companyAffiliations.push(`"${companyName}"[Grant]`);
+                companyAffiliations.push(`${companyName}[Affiliation]`);
+                companyAffiliations.push(`${companyName}[Grant Number]`);
             }
             
             companyTerms.push(...companyAffiliations);
@@ -614,16 +620,19 @@
     }
 
     // Show detailed results
-    async function showDetails(company, year) {
+    async function showDetails(company, year, page = 1) {
         showLoading();
         
         try {
             const topic = document.getElementById('topic').value;
-            const response = await fetch(`/details?topic=${encodeURIComponent(topic)}&manufacturer=${encodeURIComponent(company)}&year=${year}`);
+            const resultsPerPage = parseInt(document.getElementById('resultsPerPage').value);
+            const response = await fetch(`/details?topic=${encodeURIComponent(topic)}&manufacturer=${encodeURIComponent(company)}&year=${year}&page=${page}&per_page=${resultsPerPage}`);
             const data = await response.json();
             
             if (response.ok) {
                 displayDetails(data, company, year);
+                // Scroll to top of results when changing pages
+                document.getElementById('detailView').scrollIntoView({ behavior: 'smooth' });
             } else {
                 alert('Error: ' + data.error);
             }
@@ -642,29 +651,148 @@
         document.getElementById('detailTitle').textContent = 
             `Publications for ${company} in ${year} (${data.count} results)`;
         
+        // Set the results per page dropdown to match the current per_page value
+        const resultsPerPageSelect = document.getElementById('resultsPerPage');
+        const perPage = data.per_page || 100;
+        
+        // Find the matching option or default to the closest value
+        let optionFound = false;
+        for (let i = 0; i < resultsPerPageSelect.options.length; i++) {
+            if (parseInt(resultsPerPageSelect.options[i].value) === perPage) {
+                resultsPerPageSelect.selectedIndex = i;
+                optionFound = true;
+                break;
+            }
+        }
+        
+        // If no exact match, select the closest option
+        if (!optionFound) {
+            const values = Array.from(resultsPerPageSelect.options).map(opt => parseInt(opt.value));
+            const closest = values.reduce((prev, curr) => 
+                Math.abs(curr - perPage) < Math.abs(prev - perPage) ? curr : prev
+            );
+            
+            for (let i = 0; i < resultsPerPageSelect.options.length; i++) {
+                if (parseInt(resultsPerPageSelect.options[i].value) === closest) {
+                    resultsPerPageSelect.selectedIndex = i;
+                    break;
+                }
+            }
+        }
+        
         const content = document.getElementById('detailContent');
         content.innerHTML = '';
         
-        data.results.forEach(article => {
-            const card = document.createElement('div');
-            card.className = 'card mb-3';
-            card.innerHTML = `
-                <div class="card-body">
-                    <h5 class="card-title">${article.title}</h5>
-                    <p class="card-text">
-                        <strong>Authors:</strong> ${article.authors.join(', ')}<br>
-                        <strong>Journal:</strong> ${article.journal}<br>
-                        <strong>Publication Date:</strong> ${article.pubdate}
-                    </p>
-                    ${article.doi ? `
-                        <a href="https://doi.org/${article.doi}" target="_blank" class="btn btn-primary btn-sm">
-                            <i class="bi bi-box-arrow-up-right"></i> View Article
-                        </a>
-                    ` : ''}
-                </div>
+        // Display results
+        if (data.results.length === 0) {
+            content.innerHTML = '<div class="alert alert-info">No results found.</div>';
+        } else {
+            data.results.forEach(article => {
+                const card = document.createElement('div');
+                card.className = 'card mb-3';
+                card.innerHTML = `
+                    <div class="card-body">
+                        <h5 class="card-title">${article.title}</h5>
+                        <p class="card-text">
+                            <strong>Authors:</strong> ${article.authors.join(', ')}<br>
+                            <strong>Journal:</strong> ${article.journal}<br>
+                            <strong>Publication Date:</strong> ${article.pubdate}
+                        </p>
+                        ${article.doi ? `
+                            <a href="https://doi.org/${article.doi}" target="_blank" class="btn btn-primary btn-sm">
+                                <i class="bi bi-box-arrow-up-right"></i> View Article
+                            </a>
+                        ` : ''}
+                    </div>
+                `;
+                content.appendChild(card);
+            });
+        }
+
+        // Add pagination
+        const pagination = document.getElementById('pagination');
+        pagination.innerHTML = '';
+        
+        if (data.count > 0) {
+            // Use the per_page value from the response instead of hardcoded 100
+            const resultsPerPage = data.per_page || parseInt(document.getElementById('resultsPerPage').value);
+            const totalPages = Math.ceil(data.count / resultsPerPage);
+            const currentPage = data.page || 1;
+            const paginationUl = document.createElement('ul');
+            paginationUl.className = 'pagination justify-content-center';
+            
+            // Previous button with arrow
+            paginationUl.innerHTML += `
+                <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" aria-label="Previous" onclick="event.preventDefault(); showDetails('${company}', ${year}, ${currentPage - 1});">
+                        <span aria-hidden="true">&laquo;</span>
+                    </a>
+                </li>
             `;
-            content.appendChild(card);
-        });
+
+            // Function to add page number
+            const addPageNumber = (pageNum) => {
+                paginationUl.innerHTML += `
+                    <li class="page-item ${pageNum === currentPage ? 'active' : ''}">
+                        <a class="page-link" href="#" onclick="event.preventDefault(); showDetails('${company}', ${year}, ${pageNum});">
+                            ${pageNum}
+                        </a>
+                    </li>
+                `;
+            };
+
+            // Function to add ellipsis
+            const addEllipsis = () => {
+                paginationUl.innerHTML += `
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                `;
+            };
+
+            // First page
+            addPageNumber(1);
+
+            // Calculate visible page range
+            let startPage = Math.max(2, currentPage - 2);
+            let endPage = Math.min(totalPages - 1, currentPage + 2);
+
+            // Adjust for edge cases
+            if (currentPage <= 4) {
+                endPage = Math.min(6, totalPages - 1);
+            } else if (currentPage >= totalPages - 3) {
+                startPage = Math.max(totalPages - 5, 2);
+            }
+
+            // Add ellipsis and pages
+            if (startPage > 2) addEllipsis();
+            for (let i = startPage; i <= endPage; i++) {
+                addPageNumber(i);
+            }
+            if (endPage < totalPages - 1) addEllipsis();
+
+            // Last page if not already shown
+            if (totalPages > 1) {
+                addPageNumber(totalPages);
+            }
+
+            // Next button with arrow
+            paginationUl.innerHTML += `
+                <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                    <a class="page-link" href="#" aria-label="Next" onclick="event.preventDefault(); showDetails('${company}', ${year}, ${currentPage + 1});">
+                        <span aria-hidden="true">&raquo;</span>
+                    </a>
+                </li>
+            `;
+
+            pagination.appendChild(paginationUl);
+            
+            // Add page info text
+            const pageInfo = document.createElement('div');
+            pageInfo.className = 'text-center mt-2 text-muted';
+            pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${resultsPerPage} results per page)`;
+            pagination.appendChild(pageInfo);
+        }
     }
 
     // Handle export button click
@@ -722,11 +850,39 @@
         resultsDiv.style.display = 'block';
         resultsDiv.innerHTML = '';
 
-        // Add summary header
-        const header = document.createElement('div');
-        header.className = 'alert alert-info';
-        header.innerHTML = `Found ${data.total_count} results. Showing page ${data.current_page} of ${data.total_pages}.`;
-        resultsDiv.appendChild(header);
+        // Add summary header with results per page dropdown
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'alert alert-info d-flex justify-content-between align-items-center';
+        
+        const headerText = document.createElement('div');
+        headerText.innerHTML = `Found ${data.total_count} results. Showing page ${data.current_page} of ${data.total_pages}.`;
+        
+        const resultsPerPageDiv = document.createElement('div');
+        resultsPerPageDiv.className = 'd-flex align-items-center gap-2';
+        resultsPerPageDiv.innerHTML = `
+            <label for="basicResultsPerPage" class="mb-0 me-2">Results per page:</label>
+            <select class="form-select form-select-sm" id="basicResultsPerPage" style="width: 70px;">
+                <option value="10" ${data.results_per_page === 10 ? 'selected' : ''}>10</option>
+                <option value="20" ${data.results_per_page === 20 ? 'selected' : ''}>20</option>
+                <option value="50" ${data.results_per_page === 50 ? 'selected' : ''}>50</option>
+                <option value="100" ${data.results_per_page === 100 ? 'selected' : ''}>100</option>
+            </select>
+        `;
+        
+        headerDiv.appendChild(headerText);
+        headerDiv.appendChild(resultsPerPageDiv);
+        resultsDiv.appendChild(headerDiv);
+        
+        // Add event listener to the results per page dropdown
+        const basicResultsPerPage = document.getElementById('basicResultsPerPage');
+        basicResultsPerPage.addEventListener('change', function() {
+            const query = document.getElementById('searchQuery').value;
+            const startYear = parseInt(document.getElementById('basicStartYear').value);
+            const endYear = parseInt(document.getElementById('basicEndYear').value);
+            const resultsPerPage = parseInt(this.value);
+            
+            performBasicSearch(query, startYear, endYear, 1, resultsPerPage);
+        });
 
         // Display results
         data.results.forEach(article => {
@@ -758,6 +914,10 @@
         if (data.total_pages > 1) {
             const pagination = document.createElement('nav');
             pagination.setAttribute('aria-label', 'Search results pagination');
+            
+            // Get the current results per page from the dropdown or response
+            const resultsPerPage = data.results_per_page || parseInt(document.getElementById('basicResultsPerPage').value) || 20;
+            
             pagination.innerHTML = `
                 <ul class="pagination justify-content-center">
                     <li class="page-item ${data.current_page === 1 ? 'disabled' : ''}">
@@ -777,53 +937,17 @@
                         <a class="page-link" href="#" data-page="${data.current_page + 1}">Next</a>
                     </li>
                 </ul>
+                <div class="text-center mt-2 text-muted">
+                    Page ${data.current_page} of ${data.total_pages} (${resultsPerPage} results per page)
+                </div>
             `;
             resultsDiv.appendChild(pagination);
 
             // Add pagination event listeners
-            pagination.addEventListener('click', async function(e) {
-                e.preventDefault();
-                if (e.target.classList.contains('page-link')) {
-                    const page = parseInt(e.target.dataset.page);
-                    if (!isNaN(page)) {
-                        const query = document.getElementById('searchQuery').value;
-                        const startYear = parseInt(document.getElementById('basicStartYear').value);
-                        const endYear = parseInt(document.getElementById('basicEndYear').value);
-
-                        showLoading();
-                        try {
-                            const response = await fetch('/basic_search', {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                },
-                                body: JSON.stringify({
-                                    query: query,
-                                    start_year: startYear,
-                                    end_year: endYear,
-                                    page: page
-                                })
-                            });
-
-                            if (!response.ok) {
-                                throw new Error('Search failed');
-                            }
-
-                            const data = await response.json();
-                            if (data.error) {
-                                throw new Error(data.error);
-                            }
-
-                            displayBasicSearchResults(data);
-                            window.scrollTo(0, resultsDiv.offsetTop - 20);
-                        } catch (error) {
-                            alert('Error performing search: ' + error.message);
-                        } finally {
-                            hideLoading();
-                        }
-                    }
-                }
-            });
+            const query = document.getElementById('searchQuery').value;
+            const startYear = parseInt(document.getElementById('basicStartYear').value);
+            const endYear = parseInt(document.getElementById('basicEndYear').value);
+            attachBasicPaginationHandlers(pagination, query, startYear, endYear, resultsPerPage);
         }
     }
 
@@ -861,6 +985,82 @@
                     }, 3000);
                 }
             });
+    }
+
+    // Add event listener for results per page change
+    document.addEventListener('DOMContentLoaded', function() {
+        const resultsPerPageSelect = document.getElementById('resultsPerPage');
+        
+        resultsPerPageSelect.addEventListener('change', function() {
+            // Get the current company and year from the title
+            const title = document.getElementById('detailTitle').textContent;
+            const companyMatch = title.match(/Publications for (.*?) in/);
+            const yearMatch = title.match(/in (\d{4})/);
+            
+            if (companyMatch && yearMatch) {
+                const company = companyMatch[1];
+                const year = parseInt(yearMatch[1]);
+                
+                // Provide visual feedback
+                const originalLabel = document.querySelector('label[for="resultsPerPage"]').textContent;
+                document.querySelector('label[for="resultsPerPage"]').textContent = 'Updating...';
+                
+                // Reset to first page when changing results per page
+                showDetails(company, year, 1).then(() => {
+                    // Reset label back to original
+                    document.querySelector('label[for="resultsPerPage"]').textContent = originalLabel;
+                });
+            }
+        });
+    });
+
+    // Function to perform basic search with pagination and results per page
+    async function performBasicSearch(query, startYear, endYear, page = 1, resultsPerPage = 20) {
+        showLoading();
+        try {
+            const response = await fetch('/basic_search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    query: query,
+                    start_year: startYear,
+                    end_year: endYear,
+                    page: page,
+                    results_per_page: resultsPerPage
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Search failed');
+            }
+
+            const data = await response.json();
+            if (data.error) {
+                throw new Error(data.error);
+            }
+
+            displayBasicSearchResults(data);
+            window.scrollTo(0, document.getElementById('basicSearchResults').offsetTop - 20);
+        } catch (error) {
+            alert('Error performing search: ' + error.message);
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Update the pagination click handler for basic search
+    function attachBasicPaginationHandlers(pagination, query, startYear, endYear, resultsPerPage) {
+        pagination.addEventListener('click', async function(e) {
+            e.preventDefault();
+            if (e.target.classList.contains('page-link')) {
+                const page = parseInt(e.target.dataset.page);
+                if (!isNaN(page)) {
+                    await performBasicSearch(query, startYear, endYear, page, resultsPerPage);
+                }
+            }
+        });
     }
 </script>
 {% endblock %} 

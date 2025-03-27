@@ -141,28 +141,44 @@ class PubMedAPI:
             company_names = self._get_company_names(company, year)
             company_terms = []
             
-            # Add base company terms without quotes for more flexible matching
+            # Check if exact match is requested by looking for [Affiliation:~0] in the query
+            use_exact_match = ":~0]" in query if query else False
+            
             for name in company_names:
-                # Add the full name variations
-                company_terms.extend([
-                    f"({name}[Affiliation])",
-                    f"({name}[Grant Number])",
-                    f"({name}[Grant])"
-                ])
-                
-                # Add abbreviated versions for certain companies
-                if name.startswith("General Electric"):
+                if use_exact_match:
+                    # Use proximity search for exact matching
                     company_terms.extend([
-                        "(GE[Affiliation])",
-                        "(GE[Grant Number])",
-                        "(GE[Grant])"
+                        f'("{name}"[Affiliation:~0])',
+                        f'("{name}"[Grant Number:~0])'
                     ])
-                elif name.startswith("GE HealthCare"):
+                    # Add abbreviated versions for certain companies
+                    if name.startswith("General Electric"):
+                        company_terms.extend([
+                            '("GE"[Affiliation:~0])',
+                            '("GE"[Grant Number:~0])'
+                        ])
+                    elif name.startswith("GE HealthCare"):
+                        company_terms.extend([
+                            '("GE Healthcare"[Affiliation:~0])',
+                            '("GE Healthcare"[Grant Number:~0])'
+                        ])
+                else:
+                    # Standard search without exact matching
                     company_terms.extend([
-                        "(GE Healthcare[Affiliation])",
-                        "(GE Healthcare[Grant Number])",
-                        "(GE Healthcare[Grant])"
+                        f"({name}[Affiliation])",
+                        f"({name}[Grant Number])"
                     ])
+                    # Add abbreviated versions for certain companies
+                    if name.startswith("General Electric"):
+                        company_terms.extend([
+                            "(GE[Affiliation])",
+                            "(GE[Grant Number])"
+                        ])
+                    elif name.startswith("GE HealthCare"):
+                        company_terms.extend([
+                            "(GE Healthcare[Affiliation])",
+                            "(GE Healthcare[Grant Number])"
+                        ])
             
             # Remove duplicates while preserving order
             company_terms = list(dict.fromkeys(company_terms))
@@ -198,7 +214,7 @@ class PubMedAPI:
                 logger.info(f"Final count for query: {count}")
                 return count
                 
-            # For lower counts, verify with a second request
+            # For lower counts, verify with a second request after a delay
             logger.info(f"Low count ({count}) detected, verifying...")
             time.sleep(self.verification_delay)
             verify_response = self._make_request("esearch.fcgi", params)
@@ -268,24 +284,71 @@ class PubMedAPI:
     def get_detailed_results(self, topic: str, manufacturer: str, year: int, 
                            page: int = 1, results_per_page: int = 100) -> Dict:
         """Get detailed publication results for a specific query"""
+        # Use the same company name resolution as get_publication_count
         company_names = self._get_company_names(manufacturer, year)
         company_terms = []
+        
+        # Check if exact match is requested by looking for [Affiliation:~0] in the query
+        use_exact_match = ":~0]" in topic if topic else False
+        
         for name in company_names:
-            company_terms.extend([
-                f'"{name}"[Affiliation]',
-                f'"{name}"[Grant Number]',
-                f'"{name}"[Grant]'
-            ])
+            if use_exact_match:
+                # Use proximity search for exact matching
+                company_terms.extend([
+                    f'("{name}"[Affiliation:~0])',
+                    f'("{name}"[Grant Number:~0])'
+                ])
+                # Add abbreviated versions for certain companies
+                if name.startswith("General Electric"):
+                    company_terms.extend([
+                        '("GE"[Affiliation:~0])',
+                        '("GE"[Grant Number:~0])'
+                    ])
+                elif name.startswith("GE HealthCare"):
+                    company_terms.extend([
+                        '("GE Healthcare"[Affiliation:~0])',
+                        '("GE Healthcare"[Grant Number:~0])'
+                    ])
+            else:
+                # Standard search without exact matching
+                company_terms.extend([
+                    f"({name}[Affiliation])",
+                    f"({name}[Grant Number])"
+                ])
+                # Add abbreviated versions for certain companies
+                if name.startswith("General Electric"):
+                    company_terms.extend([
+                        "(GE[Affiliation])",
+                        "(GE[Grant Number])"
+                    ])
+                elif name.startswith("GE HealthCare"):
+                    company_terms.extend([
+                        "(GE Healthcare[Affiliation])",
+                        "(GE Healthcare[Grant Number])"
+                    ])
+        
+        # Remove duplicates while preserving order
+        company_terms = list(dict.fromkeys(company_terms))
         company_query = " OR ".join(company_terms)
         date_range = f"{year}/01/01[dp]:{year}/12/31[dp]"
-        query = f"({topic}) AND ({company_query}) AND {date_range}"
         
-        # First get PMIDs
+        # Build query based on whether topic is provided
+        if topic.strip():
+            query = f"({topic}) AND ({company_query}) AND {date_range}"
+        else:
+            query = f"({company_query}) AND {date_range}"
+            
+        logger.info(f"Detailed results query: {query}")
+        
+        # Calculate pagination parameters
+        retstart = (page - 1) * results_per_page
+        
+        # First get PMIDs with pagination
         search_params = {
             "db": "pubmed",
             "term": query,
             "retmax": results_per_page,
-            "retstart": (page - 1) * results_per_page,
+            "retstart": retstart,
             "retmode": "json"
         }
         
@@ -293,9 +356,10 @@ class PubMedAPI:
             search_response = self._make_request("esearch.fcgi", search_params)
             search_data = search_response.json()
             pmids = search_data["esearchresult"]["idlist"]
+            total_count = int(search_data["esearchresult"]["count"])
             
             if not pmids:
-                return {"count": 0, "results": []}
+                return {"count": total_count, "results": [], "page": page}
             
             # Then get details for these PMIDs
             fetch_params = {
@@ -320,36 +384,39 @@ class PubMedAPI:
                 })
             
             return {
-                "count": int(search_data["esearchresult"]["count"]),
-                "results": results
+                "count": total_count,
+                "results": results,
+                "page": page
             }
             
         except Exception as e:
-            print(f"Error getting detailed results: {str(e)}")
-            return {"count": 0, "results": []}
+            logger.error(f"Error getting detailed results: {str(e)}")
+            return {"count": 0, "results": [], "page": page}
 
     def basic_search(self, query: str, start_year: int, end_year: int, 
                     page: int = 1, results_per_page: int = 20) -> Dict:
         """Perform a basic PubMed search with year range"""
-        date_range = f"{start_year}/01/01[dp]:{end_year}/12/31[dp]"
-        full_query = f"({query}) AND {date_range}"
-        
-        # First get PMIDs
-        search_params = {
-            "db": "pubmed",
-            "term": full_query,
-            "retmax": results_per_page,
-            "retstart": (page - 1) * results_per_page,
-            "retmode": "json"
-        }
-        
         try:
+            date_range = f"{start_year}/01/01[dp]:{end_year}/12/31[dp]"
+            full_query = f"({query}) AND {date_range}"
+            
+            # First get PMIDs
+            search_params = {
+                "db": "pubmed",
+                "term": full_query,
+                "retmax": results_per_page,
+                "retstart": (page - 1) * results_per_page,
+                "retmode": "json"
+            }
+            
+            logger.info(f"Executing basic search with query: {full_query}")
             search_response = self._make_request("esearch.fcgi", search_params)
             search_data = search_response.json()
             pmids = search_data["esearchresult"]["idlist"]
             total_count = int(search_data["esearchresult"]["count"])
             
             if not pmids:
+                logger.info(f"No results found for query: {full_query}")
                 return {
                     "total_count": total_count,
                     "current_page": page,
@@ -364,6 +431,7 @@ class PubMedAPI:
                 "retmode": "json"
             }
             
+            logger.info(f"Fetching details for {len(pmids)} articles")
             fetch_response = self._make_request("esummary.fcgi", fetch_params)
             fetch_data = fetch_response.json()
             
@@ -387,10 +455,31 @@ class PubMedAPI:
                 "results": results
             }
             
-        except Exception as e:
-            print(f"Error performing basic search: {str(e)}")
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error during PubMed search: {str(e)}"
+            logger.error(error_msg)
             return {
-                "error": str(e),
+                "error": error_msg,
+                "total_count": 0,
+                "current_page": page,
+                "total_pages": 0,
+                "results": []
+            }
+        except json.JSONDecodeError as e:
+            error_msg = f"Invalid response from PubMed API: {str(e)}"
+            logger.error(error_msg)
+            return {
+                "error": error_msg,
+                "total_count": 0,
+                "current_page": page,
+                "total_pages": 0,
+                "results": []
+            }
+        except Exception as e:
+            error_msg = f"Error performing basic search: {str(e)}"
+            logger.error(error_msg)
+            return {
+                "error": error_msg,
                 "total_count": 0,
                 "current_page": page,
                 "total_pages": 0,
