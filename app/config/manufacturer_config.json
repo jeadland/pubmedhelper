@@ -1,6 +1,6 @@
 {
   "GE HealthCare": {
-    "display_order": 3,
+    "display_order": 2,
     "variations": [
       {
         "name": "General Electric",
@@ -51,7 +51,7 @@
     "acquisitions": []
   },
   "United Imaging": {
-    "display_order": 2,
+    "display_order": 4,
     "variations": [
       {
         "name": "United Imaging Healthcare",
